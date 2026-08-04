@@ -48,8 +48,10 @@ razorpay_client = (
 )
 
 # JWT configuration
-JWT_SECRET = os.environ.get('JWT_SECRET', 'default-secret-change-in-production')
+JWT_SECRET = os.environ.get('JWT_SECRET', '')
 JWT_ALGORITHM = 'HS256'
+if not JWT_SECRET:
+    logging.critical("JWT_SECRET is not set. Admin authentication will be disabled until it is configured.")
 
 # Rate limiting storage
 rate_limit_storage = defaultdict(list)
@@ -204,6 +206,46 @@ class AdminCreate(BaseModel):
             raise ValueError('Password must contain at least one number')
         return v
 
+class AdminUserCreate(BaseModel):
+    email: EmailStr
+    password: str
+    name: str
+    role: str = "manager"
+
+    @field_validator('password')
+    @classmethod
+    def validate_password(cls, v):
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters')
+        if not re.search(r'[A-Z]', v):
+            raise ValueError('Password must contain at least one uppercase letter')
+        if not re.search(r'[a-z]', v):
+            raise ValueError('Password must contain at least one lowercase letter')
+        if not re.search(r'[0-9]', v):
+            raise ValueError('Password must contain at least one number')
+        return v
+
+    @field_validator('role')
+    @classmethod
+    def validate_role(cls, v):
+        if v not in ('admin', 'manager'):
+            raise ValueError('Role must be "admin" or "manager"')
+        return v
+
+class AdminUserPublic(BaseModel):
+    id: str
+    email: EmailStr
+    name: str
+    role: str
+    created_at: datetime
+
+class DonationSettingsUpdate(BaseModel):
+    account_name: str
+    bank_name: str
+    account_number: str
+    ifsc_code: str
+    branch: str
+
 class BankDetails(BaseModel):
     account_name: str = "Aarhi Impact Foundation"
     bank_name: str = "Axis Bank"
@@ -306,15 +348,20 @@ def hash_password(password: str) -> str:
 def verify_password(password: str, password_hash: str) -> bool:
     return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
 
-def create_token(user_id: str, email: str) -> str:
+def create_token(user_id: str, email: str, role: str = "admin") -> str:
+    if not JWT_SECRET:
+        raise HTTPException(status_code=503, detail="Authentication is not configured on the server. Please set JWT_SECRET.")
     payload = {
         "sub": user_id,
         "email": email,
+        "role": role,
         "exp": datetime.now(timezone.utc).timestamp() + 86400
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 def get_current_admin(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    if not JWT_SECRET:
+        raise HTTPException(status_code=503, detail="Authentication is not configured on the server.")
     if not credentials:
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
@@ -324,6 +371,18 @@ def get_current_admin(credentials: HTTPAuthorizationCredentials = Depends(securi
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+def require_admin_role(admin = Depends(get_current_admin)):
+    """Full administrator only — user management, contacts, internship applications."""
+    if admin.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="This action requires an administrator account.")
+    return admin
+
+def require_staff(admin = Depends(get_current_admin)):
+    """Either an admin or a manager — events, reports, donation info."""
+    if admin.get("role") not in ("admin", "manager"):
+        raise HTTPException(status_code=403, detail="Access denied.")
+    return admin
 
 def send_notification_email(subject: str, html_content: str):
     if not resend.api_key:
@@ -503,7 +562,29 @@ def get_event(event_id: str):
 # Donation Info
 @api_router.get("/donations/bank-details", response_model=BankDetails)
 def get_bank_details():
+    db = get_db()
+    saved = db.settings.find_one({"key": "bank_details"}, {"_id": 0, "key": 0})
+    if saved:
+        return BankDetails(**saved)
     return BankDetails()
+
+@api_router.put("/donations/bank-details", response_model=BankDetails)
+def update_bank_details(payload: DonationSettingsUpdate, admin = Depends(require_staff)):
+    db = get_db()
+    doc = payload.model_dump()
+    db.settings.update_one(
+        {"key": "bank_details"},
+        {"$set": doc, "$setOnInsert": {"key": "bank_details"}},
+        upsert=True
+    )
+    return BankDetails(**doc)
+
+@api_router.get("/admin/donations")
+def list_donations(admin = Depends(require_staff)):
+    db = get_db()
+    donations = list(db.donations.find({}, {"_id": 0}).sort("created_at", -1).limit(500))
+    total_amount = sum(d.get("amount", 0) for d in donations)
+    return {"donations": donations, "total_amount": total_amount, "count": len(donations)}
 
 @api_router.get("/donations/tiers", response_model=List[DonationTier])
 def get_donation_tiers():
@@ -599,50 +680,94 @@ def verify_donation_payment(payload: DonationVerify, request: Request):
 
 # ============== ADMIN ROUTES ==============
 
-# Secret code required for admin registration (change this!)
-ADMIN_REGISTRATION_SECRET = os.environ.get('ADMIN_SECRET', 'AIF-SECRET-2026')
-
 @api_router.post("/admin/login")
 def admin_login(login: AdminLogin):
     db = get_db()
     admin = db.admins.find_one({"email": login.email}, {"_id": 0})
     if not admin or not verify_password(login.password, admin['password_hash']):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    token = create_token(admin['id'], admin['email'])
-    return {"token": token, "admin": {"id": admin['id'], "email": admin['email'], "name": admin['name']}}
+    role = admin.get('role', 'admin')
+    token = create_token(admin['id'], admin['email'], role)
+    return {"token": token, "admin": {"id": admin['id'], "email": admin['email'], "name": admin['name'], "role": role}}
 
-class AdminCreateWithSecret(BaseModel):
-    email: EmailStr
-    password: str
-    name: str
-    secret_code: str
+@api_router.get("/admin/bootstrap-status")
+def admin_bootstrap_status():
+    """Lets the login page know whether a founding admin account still needs to be created."""
+    db = get_db()
+    count = db.admins.count_documents({})
+    return {"needs_bootstrap": count == 0}
 
 @api_router.post("/admin/register")
-def admin_register(admin_data: AdminCreateWithSecret):
-    # Verify secret code
-    if admin_data.secret_code != ADMIN_REGISTRATION_SECRET:
-        raise HTTPException(status_code=403, detail="Invalid registration code")
-    
+def admin_register(admin_data: AdminCreate):
     db = get_db()
+    # Registration only works once, to create the very first (founding) admin account.
+    # After that, new accounts must be created by an existing admin via /admin/users.
+    if db.admins.count_documents({}) > 0:
+        raise HTTPException(status_code=403, detail="Registration is closed. Ask an existing admin to create your account.")
+
     existing = db.admins.find_one({"email": admin_data.email}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
-    
-    # Validate password
-    if len(admin_data.password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-    
+
     admin = AdminUser(
         email=admin_data.email,
         password_hash=hash_password(admin_data.password),
-        name=admin_data.name
+        name=admin_data.name,
+        role="admin"
     )
     doc = admin.model_dump()
     doc['created_at'] = doc['created_at'].isoformat()
     db.admins.insert_one(doc)
-    
-    token = create_token(admin.id, admin.email)
-    return {"token": token, "admin": {"id": admin.id, "email": admin.email, "name": admin.name}}
+
+    token = create_token(admin.id, admin.email, admin.role)
+    return {"token": token, "admin": {"id": admin.id, "email": admin.email, "name": admin.name, "role": admin.role}}
+
+@api_router.get("/admin/users", response_model=List[AdminUserPublic])
+def list_admin_users(admin = Depends(require_admin_role)):
+    db = get_db()
+    users = list(db.admins.find({}, {"_id": 0, "password_hash": 0}))
+    for u in users:
+        if isinstance(u.get('created_at'), str):
+            u['created_at'] = datetime.fromisoformat(u['created_at'])
+    return users
+
+@api_router.post("/admin/users", response_model=AdminUserPublic)
+def create_admin_user(user_data: AdminUserCreate, admin = Depends(require_admin_role)):
+    db = get_db()
+    existing = db.admins.find_one({"email": user_data.email}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    new_user = AdminUser(
+        email=user_data.email,
+        password_hash=hash_password(user_data.password),
+        name=user_data.name,
+        role=user_data.role
+    )
+    doc = new_user.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    db.admins.insert_one(doc)
+    doc.pop('password_hash', None)
+    doc['created_at'] = new_user.created_at
+    return doc
+
+@api_router.delete("/admin/users/{user_id}")
+def delete_admin_user(user_id: str, admin = Depends(require_admin_role)):
+    db = get_db()
+    target = db.admins.find_one({"id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if target["id"] == admin.get("sub"):
+        raise HTTPException(status_code=400, detail="You cannot delete your own account while logged in as it.")
+
+    if target.get("role") == "admin":
+        admin_count = db.admins.count_documents({"role": "admin"})
+        if admin_count <= 1:
+            raise HTTPException(status_code=400, detail="Cannot delete the last remaining admin account.")
+
+    db.admins.delete_one({"id": user_id})
+    return {"status": "success", "message": "User removed"}
 
 @api_router.get("/admin/me")
 def get_current_admin_info(admin = Depends(get_current_admin)):
@@ -650,7 +775,7 @@ def get_current_admin_info(admin = Depends(get_current_admin)):
 
 # Admin - Events Management
 @api_router.get("/admin/events", response_model=List[Event])
-def admin_get_events(admin = Depends(get_current_admin)):
+def admin_get_events(admin = Depends(require_staff)):
     db = get_db()
     events = list(db.events.find({}, {"_id": 0}).sort("created_at", -1).limit(100))
     for event in events:
@@ -659,7 +784,7 @@ def admin_get_events(admin = Depends(get_current_admin)):
     return events
 
 @api_router.post("/admin/events", response_model=Event)
-def admin_create_event(event_data: EventCreate, admin = Depends(get_current_admin)):
+def admin_create_event(event_data: EventCreate, admin = Depends(require_staff)):
     db = get_db()
     event = Event(**event_data.model_dump())
     doc = event.model_dump()
@@ -668,7 +793,7 @@ def admin_create_event(event_data: EventCreate, admin = Depends(get_current_admi
     return event
 
 @api_router.put("/admin/events/{event_id}", response_model=Event)
-def admin_update_event(event_id: str, event_data: EventUpdate, admin = Depends(get_current_admin)):
+def admin_update_event(event_id: str, event_data: EventUpdate, admin = Depends(require_staff)):
     db = get_db()
     update_data = {k: v for k, v in event_data.model_dump().items() if v is not None}
     if not update_data:
@@ -684,7 +809,7 @@ def admin_update_event(event_id: str, event_data: EventUpdate, admin = Depends(g
     return event
 
 @api_router.delete("/admin/events/{event_id}")
-def admin_delete_event(event_id: str, admin = Depends(get_current_admin)):
+def admin_delete_event(event_id: str, admin = Depends(require_staff)):
     db = get_db()
     result = db.events.delete_one({"id": event_id})
     if result.deleted_count == 0:
@@ -693,7 +818,7 @@ def admin_delete_event(event_id: str, admin = Depends(get_current_admin)):
 
 # Admin - Contact Submissions
 @api_router.get("/admin/contacts", response_model=List[ContactSubmission])
-def admin_get_contacts(admin = Depends(get_current_admin)):
+def admin_get_contacts(admin = Depends(require_admin_role)):
     db = get_db()
     contacts = list(db.contacts.find({}, {"_id": 0}).sort("created_at", -1).limit(100))
     for contact in contacts:
@@ -702,7 +827,7 @@ def admin_get_contacts(admin = Depends(get_current_admin)):
     return contacts
 
 @api_router.put("/admin/contacts/{contact_id}/status")
-def admin_update_contact_status(contact_id: str, status: str, admin = Depends(get_current_admin)):
+def admin_update_contact_status(contact_id: str, status: str, admin = Depends(require_admin_role)):
     db = get_db()
     result = db.contacts.update_one({"id": contact_id}, {"$set": {"status": status}})
     if result.matched_count == 0:
@@ -711,7 +836,7 @@ def admin_update_contact_status(contact_id: str, status: str, admin = Depends(ge
 
 # Admin - Internship Applications
 @api_router.get("/admin/internships", response_model=List[InternshipApplication])
-def admin_get_internship_applications(admin = Depends(get_current_admin)):
+def admin_get_internship_applications(admin = Depends(require_admin_role)):
     db = get_db()
     applications = list(db.internship_applications.find({}, {"_id": 0}).sort("created_at", -1).limit(100))
     for app in applications:
@@ -720,7 +845,7 @@ def admin_get_internship_applications(admin = Depends(get_current_admin)):
     return applications
 
 @api_router.put("/admin/internships/{app_id}/status")
-def admin_update_internship_status(app_id: str, status: str, admin = Depends(get_current_admin)):
+def admin_update_internship_status(app_id: str, status: str, admin = Depends(require_admin_role)):
     db = get_db()
     result = db.internship_applications.update_one({"id": app_id}, {"$set": {"status": status}})
     if result.matched_count == 0:
@@ -729,7 +854,7 @@ def admin_update_internship_status(app_id: str, status: str, admin = Depends(get
 
 # Admin - Reports/Documents Management
 @api_router.get("/admin/reports", response_model=List[Report])
-def admin_get_reports(admin = Depends(get_current_admin)):
+def admin_get_reports(admin = Depends(require_staff)):
     db = get_db()
     reports = list(db.reports.find({}, {"_id": 0}).sort("created_at", -1).limit(100))
     for report in reports:
@@ -738,7 +863,7 @@ def admin_get_reports(admin = Depends(get_current_admin)):
     return reports
 
 @api_router.post("/admin/reports", response_model=Report)
-def admin_create_report(report_data: ReportCreate, admin = Depends(get_current_admin)):
+def admin_create_report(report_data: ReportCreate, admin = Depends(require_staff)):
     db = get_db()
     report = Report(**report_data.model_dump())
     doc = report.model_dump()
@@ -747,7 +872,7 @@ def admin_create_report(report_data: ReportCreate, admin = Depends(get_current_a
     return report
 
 @api_router.put("/admin/reports/{report_id}", response_model=Report)
-def admin_update_report(report_id: str, report_data: ReportUpdate, admin = Depends(get_current_admin)):
+def admin_update_report(report_id: str, report_data: ReportUpdate, admin = Depends(require_staff)):
     db = get_db()
     update_data = {k: v for k, v in report_data.model_dump().items() if v is not None}
     if not update_data:
@@ -763,7 +888,7 @@ def admin_update_report(report_id: str, report_data: ReportUpdate, admin = Depen
     return report
 
 @api_router.delete("/admin/reports/{report_id}")
-def admin_delete_report(report_id: str, admin = Depends(get_current_admin)):
+def admin_delete_report(report_id: str, admin = Depends(require_staff)):
     db = get_db()
     result = db.reports.delete_one({"id": report_id})
     if result.deleted_count == 0:
@@ -785,17 +910,28 @@ def get_public_reports():
 def admin_get_stats(admin = Depends(get_current_admin)):
     db = get_db()
     events_count = db.events.count_documents({})
+    reports_count = db.reports.count_documents({})
+    donations_count = db.donations.count_documents({})
+    donations_total = sum(d.get("amount", 0) for d in db.donations.find({}, {"amount": 1}))
+
+    if admin.get("role") != "admin":
+        return {
+            "events": events_count,
+            "reports": reports_count,
+            "donations": {"total": donations_count, "amount": donations_total}
+        }
+
     contacts_count = db.contacts.count_documents({})
     pending_contacts = db.contacts.count_documents({"status": "new"})
     applications_count = db.internship_applications.count_documents({})
     pending_applications = db.internship_applications.count_documents({"status": "pending"})
-    reports_count = db.reports.count_documents({})
-    
+
     return {
         "events": events_count,
         "contacts": {"total": contacts_count, "pending": pending_contacts},
         "applications": {"total": applications_count, "pending": pending_applications},
-        "reports": reports_count
+        "reports": reports_count,
+        "donations": {"total": donations_count, "amount": donations_total}
     }
 
 # Include router

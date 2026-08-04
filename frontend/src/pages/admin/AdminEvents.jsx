@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 import axios from 'axios';
+import { getSidebarLinks, getCurrentAdmin } from '@/lib/adminNav';
 import { 
   House, 
   CalendarBlank, 
@@ -36,13 +37,6 @@ const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 const API = `${BACKEND_URL}/api`;
 const LOGO_URL = "https://customer-assets.emergentagent.com/job_4ddcd04d-f96e-49a1-b836-19d6bf0f6915/artifacts/izeih8if_AIF%20Logo_website_footer.png";
 
-const sidebarLinks = [
-  { name: 'Dashboard', path: '/admin', icon: House },
-  { name: 'Events', path: '/admin/events', icon: CalendarBlank },
-  { name: 'Reports', path: '/admin/reports', icon: FileText },
-  { name: 'Contact Messages', path: '/admin/contacts', icon: Envelope },
-  { name: 'Applications', path: '/admin/internships', icon: Users },
-];
 
 const categories = [
   { id: 'workshop', name: 'Workshop' },
@@ -53,6 +47,8 @@ const categories = [
 
 export default function AdminEvents() {
   const navigate = useNavigate();
+  const currentAdmin = getCurrentAdmin();
+  const sidebarLinks = getSidebarLinks(currentAdmin?.role || 'admin');
   const [events, setEvents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);

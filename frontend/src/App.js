@@ -31,6 +31,8 @@ import AdminEvents from "@/pages/admin/AdminEvents";
 import AdminReports from "@/pages/admin/AdminReports";
 import AdminContacts from "@/pages/admin/AdminContacts";
 import AdminInternships from "@/pages/admin/AdminInternships";
+import AdminDonations from "@/pages/admin/AdminDonations";
+import AdminUsers from "@/pages/admin/AdminUsers";
 
 // Layout wrapper for public pages
 const PublicLayout = ({ children }) => (
@@ -73,6 +75,8 @@ function App() {
           <Route path="/admin/reports" element={<AdminReports />} />
           <Route path="/admin/contacts" element={<AdminContacts />} />
           <Route path="/admin/internships" element={<AdminInternships />} />
+          <Route path="/admin/donations" element={<AdminDonations />} />
+          <Route path="/admin/users" element={<AdminUsers />} />
         </Routes>
       </BrowserRouter>
       <Toaster position="top-right" />
