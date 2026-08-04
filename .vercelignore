@@ -1,0 +1,17 @@
+# Ignore files not needed for Vercel deployment
+backend/
+deploy.sh
+update.sh
+test_reports/
+tests/
+*.log
+node_modules/
+__pycache__/
+*.pyc
+.env.local
+backend_test.py
+test_result.md
+design_guidelines.json
+memory/
+frontend/node_modules/
+.git/

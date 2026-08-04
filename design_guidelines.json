@@ -1,0 +1,127 @@
+{
+  "design_system": {
+    "identity": {
+      "brand_name": "Aarhi Impact Foundation",
+      "tone": "Institutional, Research-Driven, Premium, Impact-Oriented",
+      "visual_metaphor": "The Modern Archive: Structured data meets organic warmth."
+    },
+    "typography": {
+      "primary_font": "Manrope",
+      "secondary_font": "Public Sans",
+      "font_weights": {
+        "light": 300,
+        "regular": 400,
+        "medium": 500,
+        "bold": 700
+      },
+      "styles": {
+        "h1": "font-manrope text-5xl md:text-7xl font-bold tracking-tight text-[#1B4332] leading-[1.1]",
+        "h2": "font-manrope text-4xl md:text-5xl font-semibold tracking-tight text-[#1B4332]",
+        "h3": "font-manrope text-2xl md:text-3xl font-medium text-[#1B4332]",
+        "body": "font-public text-base md:text-lg leading-relaxed text-gray-700",
+        "caption": "font-public text-sm uppercase tracking-widest text-[#2D6A6A] font-semibold",
+        "button_text": "font-manrope font-semibold tracking-wide"
+      }
+    },
+    "colors": {
+      "palette": {
+        "background": "#F1EFE9",
+        "primary": "#1B4332",
+        "primary_foreground": "#FFFFFF",
+        "secondary": "#2D6A6A",
+        "secondary_foreground": "#FFFFFF",
+        "accent": "#C2A878",
+        "accent_foreground": "#1B4332",
+        "muted": "#E6E4DD",
+        "muted_foreground": "#64748B",
+        "surface": "#FFFFFF",
+        "border": "#D1D5DB"
+      },
+      "usage": {
+        "body_bg": "bg-[#F1EFE9]",
+        "header_bg": "bg-[#1B4332]",
+        "footer_bg": "bg-[#1B4332]",
+        "card_bg": "bg-white border border-[#E6E4DD]",
+        "text_primary": "text-[#1B4332]",
+        "text_secondary": "text-[#2D6A6A]"
+      }
+    },
+    "spacing": {
+      "container_padding": "px-4 md:px-8 lg:px-12",
+      "section_spacing": "py-20 md:py-32",
+      "element_spacing": "space-y-6"
+    },
+    "shadows": {
+      "card": "shadow-[0_1px_3px_rgba(0,0,0,0.05)]",
+      "card_hover": "shadow-[0_10px_40px_-10px_rgba(27,67,50,0.1)]",
+      "dropdown": "shadow-xl border border-gray-100"
+    },
+    "border_radius": {
+      "default": "rounded-sm",
+      "button": "rounded-md",
+      "card": "rounded-lg"
+    },
+    "component_styles": {
+      "buttons": {
+        "primary": "bg-[#2D6A6A] text-white hover:bg-[#1B4332] transition-all duration-300 rounded-sm px-8 py-3 font-medium shadow-sm hover:shadow-md",
+        "outline": "bg-transparent border-2 border-[#1B4332] text-[#1B4332] hover:bg-[#1B4332] hover:text-white transition-all duration-300 rounded-sm px-8 py-3 font-medium",
+        "accent": "bg-[#C2A878] text-[#1B4332] hover:bg-[#D4B989] transition-all duration-300 rounded-sm px-8 py-3 font-bold"
+      },
+      "cards": {
+        "feature": "bg-white p-8 rounded-sm border-l-4 border-[#2D6A6A] hover:translate-y-[-4px] transition-transform duration-300 shadow-sm",
+        "impact": "bg-[#1B4332] text-white p-8 rounded-sm relative overflow-hidden"
+      },
+      "inputs": {
+        "default": "bg-white border-[#D1D5DB] focus:border-[#2D6A6A] focus:ring-1 focus:ring-[#2D6A6A] rounded-sm p-3"
+      }
+    }
+  },
+  "layout_strategies": {
+    "hero": "Full-screen with parallax background image. Content aligned bottom-left or centered with heavy typography. Use a dark overlay (opacity 40%) on the image to ensure text readability.",
+    "bento_grid": "Use for Impact Metrics. A mix of 1x1 (stats), 2x1 (graphs), and 2x2 (maps) blocks. Gap-4 or Gap-6.",
+    "editorial": "For 'About' and 'Programs'. 50% width text, 50% width image, alternating rows. Large sticky headings on the left while content scrolls on the right.",
+    "masonry": "For 'Events' or 'Stories'. Uneven columns to create organic feel."
+  },
+  "visual_enhancers": {
+    "texture": "Add a subtle 'noise' opacity-5 overlay to the #F1EFE9 background to give it a paper feel.",
+    "lines": "Use 1px solid lines (#1B4332 opacity 10%) to separate sections. Create a grid-like feel in the background of data sections.",
+    "icons": "Use 'Phosphor Icons' (Thin or Light weight) for a precise, technical look."
+  },
+  "images": {
+    "hero_main": {
+      "url": "https://images.unsplash.com/photo-1710503915593-9801b71740fc?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1NjZ8MHwxfHNlYXJjaHwxfHxub3J0aGVhc3QlMjBpbmRpYSUyMGxhbmRzY2FwZSUyMG1vdW50YWlucyUyMHJpdmVyfGVufDB8fHx8MTc3Mzc3MjQ2MHww&ixlib=rb-4.1.0&q=85",
+      "alt": "Northeast India Mountains and River Landscape",
+      "usage": "Homepage Hero Background"
+    },
+    "agriculture": {
+      "url": "https://images.unsplash.com/photo-1708417134307-3ce870f8a31a?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzV8MHwxfHNlYXJjaHwxfHxpbmRpYW4lMjBmYXJtZXJzJTIwc3VzdGFpbmFibGUlMjBhZ3JpY3VsdHVyZSUyMG9yZ2FuaWMlMjBmYXJtaW5nfGVufDB8fHx8MTc3Mzc3MjQ2MXww&ixlib=rb-4.1.0&q=85",
+      "alt": "Indian Woman Farmer with Sustainable Crop",
+      "usage": "Sustainable Agriculture Program Section"
+    },
+    "solar": {
+      "url": "https://images.unsplash.com/photo-1648328816428-1b14adcc5f2c?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMjV8MHwxfHNlYXJjaHwzfHxzb2xhciUyMHBhbmVscyUyMGluc3RhbGxhdGlvbiUyMHJ1cmFsJTIwaW5kaWElMjByZW5ld2FibGUlMjBlbmVyZ3l8ZW58MHx8fHwxNzczNzcyNDYzfDA&ixlib=rb-4.1.0&q=85",
+      "alt": "Solar Panels in Rural Mountain Area",
+      "usage": "Climate & Technology Section"
+    },
+    "students": {
+      "url": "https://images.unsplash.com/photo-1756885375569-f04400d99cee?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzJ8MHwxfHNlYXJjaHw0fHxkaXZlcnNlJTIwZ3JvdXAlMjBvZiUyMGluZGlhbiUyMHN0dWRlbnRzJTIwdXNpbmclMjBsYXB0b3BzJTIwdGVjaG5vbG9neSUyMGVkdWNhdGlvbnxlbnwwfHx8fDE3NzM3NzI0NjJ8MA&ixlib=rb-4.1.0&q=85",
+      "alt": "Students in Classroom",
+      "usage": "Internship & Education Section"
+    },
+    "logo": {
+      "url": "https://customer-assets.emergentagent.com/job_4ddcd04d-f96e-49a1-b836-19d6bf0f6915/artifacts/izeih8if_AIF%20Logo_website_footer.png",
+      "alt": "Aarhi Impact Foundation Logo",
+      "usage": "Header and Footer"
+    }
+  },
+  "instructions_to_main_agent": [
+    "INSTALL: npm install @phosphor-icons/react framer-motion clsx tailwind-merge",
+    "THEME: Ensure 'Manrope' and 'Public Sans' are imported in index.css (via Google Fonts).",
+    "LAYOUT: Use a sticky header that changes background from Transparent (on Hero) to #1B4332 (on scroll).",
+    "ADMIN: The Admin Panel should feel distinct - cleaner, denser, white background, using Shadcn tables.",
+    "FORMS: Use Shadcn Form components but style them with the #2D6A6A focus ring.",
+    "ACCESSIBILITY: Ensure text over images has sufficient contrast. Use 'bg-black/40' overlays if needed.",
+    "TESTING: Add data-testid to all interactive elements (buttons, links, inputs).",
+    "UNIVERSAL: Do NOT use generic gradients. Use solid blocks of color or subtle noise textures."
+  ]
+}
