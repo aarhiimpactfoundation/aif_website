@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 import jwt
 import bcrypt
 import resend
+import razorpay
 from collections import defaultdict
 import time
 import threading
@@ -37,6 +38,14 @@ def get_db():
 resend.api_key = os.environ.get('RESEND_API_KEY', '')
 SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'notifications@aarhiimpactfoundation.org')
 NOTIFICATION_EMAIL = os.environ.get('NOTIFICATION_EMAIL', 'info@aarhiimpactfoundation.org')
+
+# Razorpay configuration
+RAZORPAY_KEY_ID = os.environ.get('RAZORPAY_KEY_ID', '')
+RAZORPAY_KEY_SECRET = os.environ.get('RAZORPAY_KEY_SECRET', '')
+razorpay_client = (
+    razorpay.Client(auth=(RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET))
+    if RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET else None
+)
 
 # JWT configuration
 JWT_SECRET = os.environ.get('JWT_SECRET', 'default-secret-change-in-production')
@@ -197,16 +206,63 @@ class AdminCreate(BaseModel):
 
 class BankDetails(BaseModel):
     account_name: str = "Aarhi Impact Foundation"
-    bank_name: str = "UCO Bank"
-    account_number: str = "28790210001813"
-    ifsc_code: str = "UCBA0002879"
-    branch: str = "Panjabari Branch"
-    upi_id: str = ""
+    bank_name: str = "Axis Bank"
+    account_number: str = "926020030102964"
+    ifsc_code: str = "UTIB0004285"
+    branch: str = "Kalapahar"
 
 class DonationTier(BaseModel):
     amount: int
     impact: str
     description: str
+
+class DonationOrderCreate(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    amount: int  # whole rupees
+    donor_name: str
+    donor_email: EmailStr
+    donor_phone: Optional[str] = None
+    donation_type: str = "one-time"
+
+    @field_validator('amount')
+    @classmethod
+    def validate_amount(cls, v):
+        if v < 100:
+            raise ValueError('Minimum donation amount is ₹100')
+        if v > 10000000:
+            raise ValueError('Amount exceeds maximum allowed for online payment')
+        return v
+
+    @field_validator('donor_name')
+    @classmethod
+    def sanitize_name(cls, v):
+        if v:
+            v = re.sub(r'<[^>]*>', '', v).strip()
+        return v
+
+    @field_validator('donation_type')
+    @classmethod
+    def validate_donation_type(cls, v):
+        if v not in ('one-time', 'monthly', 'csr'):
+            raise ValueError('Invalid donation type')
+        return v
+
+class DonationOrderResponse(BaseModel):
+    order_id: str
+    amount: int
+    currency: str = "INR"
+    key_id: str
+
+class DonationVerify(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    razorpay_order_id: str
+    razorpay_payment_id: str
+    razorpay_signature: str
+    amount: int
+    donor_name: str
+    donor_email: EmailStr
+    donor_phone: Optional[str] = None
+    donation_type: str = "one-time"
 
 # Report/Document Models
 class Report(BaseModel):
@@ -458,6 +514,75 @@ def get_donation_tiers():
         DonationTier(amount=50000, impact="Support a complete workshop program", description="Program Sponsor"),
         DonationTier(amount=100000, impact="Enable comprehensive community intervention", description="Strategic Partner")
     ]
+
+# Razorpay online payments
+@api_router.post("/donations/create-order", response_model=DonationOrderResponse)
+def create_donation_order(payload: DonationOrderCreate, request: Request):
+    if not razorpay_client:
+        raise HTTPException(status_code=503, detail="Online payments are temporarily unavailable. Please use bank transfer instead.")
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not check_rate_limit(client_ip, 10):
+        raise HTTPException(status_code=429, detail="Too many requests. Please try again later.")
+
+    try:
+        order = razorpay_client.order.create({
+            "amount": payload.amount * 100,  # paise
+            "currency": "INR",
+            "receipt": f"aif-{uuid.uuid4().hex[:12]}",
+            "notes": {
+                "donor_name": payload.donor_name,
+                "donor_email": payload.donor_email,
+                "donation_type": payload.donation_type
+            }
+        })
+    except Exception as e:
+        logger.error(f"Razorpay order creation failed: {e}")
+        raise HTTPException(status_code=502, detail="Could not create payment order. Please try again.")
+
+    return DonationOrderResponse(order_id=order["id"], amount=payload.amount, key_id=RAZORPAY_KEY_ID)
+
+@api_router.post("/donations/verify-payment")
+def verify_donation_payment(payload: DonationVerify, request: Request):
+    if not razorpay_client:
+        raise HTTPException(status_code=503, detail="Online payments are temporarily unavailable.")
+
+    try:
+        razorpay_client.utility.verify_payment_signature({
+            'razorpay_order_id': payload.razorpay_order_id,
+            'razorpay_payment_id': payload.razorpay_payment_id,
+            'razorpay_signature': payload.razorpay_signature
+        })
+    except razorpay.errors.SignatureVerificationError:
+        raise HTTPException(status_code=400, detail="Payment verification failed.")
+
+    db = get_db()
+    doc = {
+        "id": str(uuid.uuid4()),
+        "order_id": payload.razorpay_order_id,
+        "payment_id": payload.razorpay_payment_id,
+        "amount": payload.amount,
+        "donor_name": payload.donor_name,
+        "donor_email": payload.donor_email,
+        "donor_phone": payload.donor_phone,
+        "donation_type": payload.donation_type,
+        "status": "verified",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    db.donations.insert_one(doc)
+
+    html = f"""
+    <h2>New Donation Received</h2>
+    <p><strong>Amount:</strong> &#8377;{payload.amount:,}</p>
+    <p><strong>Donor:</strong> {payload.donor_name}</p>
+    <p><strong>Email:</strong> {payload.donor_email}</p>
+    <p><strong>Phone:</strong> {payload.donor_phone or 'N/A'}</p>
+    <p><strong>Type:</strong> {payload.donation_type}</p>
+    <p><strong>Payment ID:</strong> {payload.razorpay_payment_id}</p>
+    """
+    send_notification_email(f"[AIF Donation] Rs.{payload.amount:,} from {payload.donor_name}", html)
+
+    return {"status": "success", "message": "Payment verified successfully"}
 
 # ============== ADMIN ROUTES ==============
 
