@@ -7,11 +7,14 @@ import {
   Leaf,
   Bank,
   CreditCard,
-  QrCode,
   ShieldCheck,
-  CheckCircle
+  CheckCircle,
+  Lightning
 } from '@phosphor-icons/react';
+import { toast } from 'sonner';
 import axios from 'axios';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
 const API = `${BACKEND_URL}/api`;
@@ -29,10 +32,121 @@ export default function Donate() {
   const [bankDetails, setBankDetails] = useState(null);
   const [donationTiers, setDonationTiers] = useState([]);
   const [showBankDetails, setShowBankDetails] = useState(false);
+  const [donorName, setDonorName] = useState('');
+  const [donorEmail, setDonorEmail] = useState('');
+  const [donorPhone, setDonorPhone] = useState('');
+  const [isPaying, setIsPaying] = useState(false);
 
   useEffect(() => {
     fetchDonationInfo();
   }, []);
+
+  const loadRazorpayScript = () => {
+    return new Promise((resolve) => {
+      if (window.Razorpay) {
+        resolve(true);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+      script.onload = () => resolve(true);
+      script.onerror = () => resolve(false);
+      document.body.appendChild(script);
+    });
+  };
+
+  const getDonationAmount = () => {
+    if (selectedAmount) return selectedAmount;
+    const parsed = parseInt(customAmount, 10);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  const handleRazorpayPayment = async () => {
+    const amount = getDonationAmount();
+
+    if (!amount || amount < 100) {
+      toast.error('Please select or enter an amount of at least ₹100');
+      return;
+    }
+    if (!donorName.trim() || !donorEmail.trim()) {
+      toast.error('Please enter your name and email to continue');
+      return;
+    }
+
+    setIsPaying(true);
+    try {
+      const scriptLoaded = await loadRazorpayScript();
+      if (!scriptLoaded) {
+        toast.error('Could not load payment gateway. Please check your connection and try again.');
+        setIsPaying(false);
+        return;
+      }
+
+      const orderRes = await axios.post(`${API}/donations/create-order`, {
+        amount,
+        donor_name: donorName.trim(),
+        donor_email: donorEmail.trim(),
+        donor_phone: donorPhone.trim() || undefined,
+        donation_type: selectedType
+      });
+      const { order_id, key_id, amount: orderAmount, currency } = orderRes.data;
+
+      const options = {
+        key: key_id,
+        amount: orderAmount * 100,
+        currency: currency || 'INR',
+        name: 'Aarhi Impact Foundation',
+        description: selectedType === 'monthly' ? 'Monthly Donation' : selectedType === 'csr' ? 'CSR Contribution' : 'One-Time Donation',
+        order_id,
+        prefill: {
+          name: donorName.trim(),
+          email: donorEmail.trim(),
+          contact: donorPhone.trim() || undefined
+        },
+        theme: { color: '#1B4332' },
+        handler: async (response) => {
+          try {
+            await axios.post(`${API}/donations/verify-payment`, {
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_signature: response.razorpay_signature,
+              amount,
+              donor_name: donorName.trim(),
+              donor_email: donorEmail.trim(),
+              donor_phone: donorPhone.trim() || undefined,
+              donation_type: selectedType
+            });
+            toast.success('Thank you! Your donation was received successfully.');
+            setSelectedAmount(null);
+            setCustomAmount('');
+            setDonorName('');
+            setDonorEmail('');
+            setDonorPhone('');
+          } catch (error) {
+            console.error('Payment verification failed:', error);
+            toast.error('Payment received but verification failed. Please contact us with your payment ID.');
+          } finally {
+            setIsPaying(false);
+          }
+        },
+        modal: {
+          ondismiss: () => setIsPaying(false)
+        }
+      };
+
+      const razorpayInstance = new window.Razorpay(options);
+      razorpayInstance.on('payment.failed', () => {
+        toast.error('Payment failed. Please try again or use bank transfer.');
+        setIsPaying(false);
+      });
+      razorpayInstance.open();
+    } catch (error) {
+      console.error('Error initiating payment:', error);
+      const message = error?.response?.data?.detail || 'Could not start payment. Please try again or use bank transfer.';
+      toast.error(message);
+      setIsPaying(false);
+    }
+  };
 
   const fetchDonationInfo = async () => {
     try {
@@ -47,11 +161,10 @@ export default function Donate() {
       // Set default values
       setBankDetails({
         account_name: "Aarhi Impact Foundation",
-        bank_name: "State Bank of India",
-        account_number: "XXXXXXXXXXXX",
-        ifsc_code: "SBIN0XXXXXX",
-        branch: "North East India",
-        upi_id: "aarhiimpact@sbi"
+        bank_name: "Axis Bank",
+        account_number: "926020030102964",
+        ifsc_code: "UTIB0004285",
+        branch: "Kalapahar"
       });
       setDonationTiers([
         { amount: 5000, impact: "Support green skills training for 1 youth", description: "Basic Supporter" },
@@ -222,10 +335,6 @@ export default function Donate() {
                     <p className="text-gray-500">Branch</p>
                     <p className="font-medium text-[#1B4332]">{bankDetails.branch}</p>
                   </div>
-                  <div>
-                    <p className="text-gray-500">UPI ID</p>
-                    <p className="font-medium text-[#1B4332]">{bankDetails.upi_id}</p>
-                  </div>
                 </div>
                 <p className="text-xs text-gray-500 mt-4">
                   After making the transfer, please email the transaction details to{' '}
@@ -236,24 +345,64 @@ export default function Donate() {
               </motion.div>
             )}
 
-            {/* UPI Option */}
-            <div className="flex items-center justify-between p-4 bg-white rounded-sm mb-4">
-              <div className="flex items-center gap-3">
-                <QrCode size={24} className="text-[#2D6A6A]" />
-                <span className="font-medium text-[#1B4332]">UPI Payment</span>
+            {/* Online Payment via Razorpay */}
+            <div className="p-6 bg-white rounded-sm border-2 border-[#2D6A6A]/20">
+              <div className="flex items-center gap-3 mb-4">
+                <CreditCard size={24} className="text-[#2D6A6A]" />
+                <span className="font-medium text-[#1B4332]">Pay Online</span>
               </div>
-              <span className="text-sm text-gray-500">{bankDetails?.upi_id || 'aarhiimpact@sbi'}</span>
-            </div>
-
-            {/* Online Payment Placeholder */}
-            <div className="p-4 bg-white rounded-sm border-2 border-dashed border-gray-200">
-              <div className="flex items-center gap-3 text-gray-400">
-                <CreditCard size={24} />
+              <div className="grid md:grid-cols-2 gap-4 mb-4">
                 <div>
-                  <p className="font-medium">Online Payment Gateway</p>
-                  <p className="text-sm">Coming Soon - Razorpay Integration</p>
+                  <Label htmlFor="donor-name" className="text-sm text-gray-600">Full Name</Label>
+                  <Input
+                    id="donor-name"
+                    type="text"
+                    placeholder="Your name"
+                    value={donorName}
+                    onChange={(e) => setDonorName(e.target.value)}
+                    className="mt-1"
+                    data-testid="donor-name-input"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="donor-email" className="text-sm text-gray-600">Email</Label>
+                  <Input
+                    id="donor-email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={donorEmail}
+                    onChange={(e) => setDonorEmail(e.target.value)}
+                    className="mt-1"
+                    data-testid="donor-email-input"
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <Label htmlFor="donor-phone" className="text-sm text-gray-600">Phone (optional)</Label>
+                  <Input
+                    id="donor-phone"
+                    type="tel"
+                    placeholder="+91 XXXXX XXXXX"
+                    value={donorPhone}
+                    onChange={(e) => setDonorPhone(e.target.value)}
+                    className="mt-1"
+                    data-testid="donor-phone-input"
+                  />
                 </div>
               </div>
+              <button
+                onClick={handleRazorpayPayment}
+                disabled={isPaying}
+                className="w-full flex items-center justify-center gap-2 bg-[#2D6A6A] hover:bg-[#1B4332] disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-sm transition-colors"
+                data-testid="razorpay-pay-button"
+              >
+                <Lightning size={20} weight="fill" />
+                {isPaying
+                  ? 'Processing…'
+                  : getDonationAmount() > 0
+                    ? `Pay ${formatCurrency(getDonationAmount())} via Razorpay`
+                    : 'Pay via Razorpay'}
+              </button>
+              <p className="text-xs text-gray-400 mt-3 text-center">Secured by Razorpay · Cards, UPI, Netbanking & Wallets accepted</p>
             </div>
           </div>
 
