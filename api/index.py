@@ -554,33 +554,46 @@ def verify_donation_payment(payload: DonationVerify, request: Request):
             'razorpay_signature': payload.razorpay_signature
         })
     except razorpay.errors.SignatureVerificationError:
+        logger.warning(f"Signature verification failed for order {payload.razorpay_order_id}, payment {payload.razorpay_payment_id}")
         raise HTTPException(status_code=400, detail="Payment verification failed.")
+    except Exception as e:
+        logger.exception(f"Unexpected error during signature verification for payment {payload.razorpay_payment_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Verification error: {str(e)}")
 
-    db = get_db()
-    doc = {
-        "id": str(uuid.uuid4()),
-        "order_id": payload.razorpay_order_id,
-        "payment_id": payload.razorpay_payment_id,
-        "amount": payload.amount,
-        "donor_name": payload.donor_name,
-        "donor_email": payload.donor_email,
-        "donor_phone": payload.donor_phone,
-        "donation_type": payload.donation_type,
-        "status": "verified",
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    db.donations.insert_one(doc)
+    # Signature is genuine at this point — the payment is confirmed.
+    # A DB or email hiccup below must NOT tell the donor their real,
+    # already-successful payment "failed".
+    try:
+        db = get_db()
+        doc = {
+            "id": str(uuid.uuid4()),
+            "order_id": payload.razorpay_order_id,
+            "payment_id": payload.razorpay_payment_id,
+            "amount": payload.amount,
+            "donor_name": payload.donor_name,
+            "donor_email": payload.donor_email,
+            "donor_phone": payload.donor_phone,
+            "donation_type": payload.donation_type,
+            "status": "verified",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        db.donations.insert_one(doc)
+    except Exception as e:
+        logger.exception(f"Failed to record verified donation (payment_id={payload.razorpay_payment_id}) in DB: {e}")
 
-    html = f"""
-    <h2>New Donation Received</h2>
-    <p><strong>Amount:</strong> &#8377;{payload.amount:,}</p>
-    <p><strong>Donor:</strong> {payload.donor_name}</p>
-    <p><strong>Email:</strong> {payload.donor_email}</p>
-    <p><strong>Phone:</strong> {payload.donor_phone or 'N/A'}</p>
-    <p><strong>Type:</strong> {payload.donation_type}</p>
-    <p><strong>Payment ID:</strong> {payload.razorpay_payment_id}</p>
-    """
-    send_notification_email(f"[AIF Donation] Rs.{payload.amount:,} from {payload.donor_name}", html)
+    try:
+        html = f"""
+        <h2>New Donation Received</h2>
+        <p><strong>Amount:</strong> &#8377;{payload.amount:,}</p>
+        <p><strong>Donor:</strong> {payload.donor_name}</p>
+        <p><strong>Email:</strong> {payload.donor_email}</p>
+        <p><strong>Phone:</strong> {payload.donor_phone or 'N/A'}</p>
+        <p><strong>Type:</strong> {payload.donation_type}</p>
+        <p><strong>Payment ID:</strong> {payload.razorpay_payment_id}</p>
+        """
+        send_notification_email(f"[AIF Donation] Rs.{payload.amount:,} from {payload.donor_name}", html)
+    except Exception as e:
+        logger.exception(f"Failed to send donation notification email (payment_id={payload.razorpay_payment_id}): {e}")
 
     return {"status": "success", "message": "Payment verified successfully"}
 
