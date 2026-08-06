@@ -1023,27 +1023,37 @@ def admin_get_stats(admin = Depends(get_current_admin)):
 # Include router
 app.include_router(api_router)
 
-# Security Headers Middleware
-@app.middleware("http")
-async def add_security_headers(request: Request, call_next):
-    try:
-        response = await call_next(request)
-    except Exception as exc:
-        # BaseHTTPMiddleware (this decorator style) doesn't let FastAPI's own
-        # exception handlers run cleanly on downstream crashes — without this
-        # try/except, every unhandled error becomes a bare, contentless
-        # "Internal Server Error" instead of a diagnosable JSON message.
-        logger.exception(f"Unhandled exception on {request.method} {request.url.path}: {exc}")
-        response = JSONResponse(
-            status_code=500,
-            content={"detail": f"{type(exc).__name__}: {str(exc)}"}
-        )
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["X-XSS-Protection"] = "1; mode=block"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
-    return response
+# Security Headers Middleware — pure ASGI, not BaseHTTPMiddleware.
+# BaseHTTPMiddleware (the @app.middleware("http") decorator style) runs the
+# downstream app inside a separate anyio task group. On Vercel's ASGI runtime
+# this was letting real exceptions escape as a bare, undetailed
+# "Internal Server Error" / ExceptionGroup instead of reaching FastAPI's own
+# exception handling. A pure ASGI middleware has no task group in the way —
+# it just wraps the 'send' callable to inject headers into the response.
+class SecurityHeadersMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = message.setdefault("headers", [])
+                headers.extend([
+                    (b"x-content-type-options", b"nosniff"),
+                    (b"x-frame-options", b"DENY"),
+                    (b"x-xss-protection", b"1; mode=block"),
+                    (b"referrer-policy", b"strict-origin-when-cross-origin"),
+                    (b"permissions-policy", b"geolocation=(), microphone=(), camera=()"),
+                ])
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+app.add_middleware(SecurityHeadersMiddleware)
 
 # CORS middleware
 app.add_middleware(
