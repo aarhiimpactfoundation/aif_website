@@ -6,6 +6,7 @@ from pymongo import MongoClient
 import os
 import logging
 import re
+import hmac
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 from typing import List, Optional
 import uuid
@@ -712,6 +713,58 @@ def admin_bootstrap_status():
     db = get_db()
     count = db.admins.count_documents({})
     return {"needs_bootstrap": count == 0}
+
+class EmergencyPasswordReset(BaseModel):
+    email: EmailStr
+    new_password: str
+    recovery_key: str
+
+    @field_validator('new_password')
+    @classmethod
+    def validate_password(cls, v):
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters')
+        if not re.search(r'[A-Z]', v):
+            raise ValueError('Password must contain at least one uppercase letter')
+        if not re.search(r'[a-z]', v):
+            raise ValueError('Password must contain at least one lowercase letter')
+        if not re.search(r'[0-9]', v):
+            raise ValueError('Password must contain at least one number')
+        return v
+
+EMERGENCY_RESET_KEY = os.environ.get('EMERGENCY_RESET_KEY', '')
+
+@api_router.post("/admin/emergency-reset")
+def emergency_password_reset(payload: EmergencyPasswordReset, request: Request):
+    """
+    A safety valve for a locked-out admin. Disabled unless EMERGENCY_RESET_KEY is
+    explicitly set in the environment — with no key configured, this always 404s.
+    Generates the password hash correctly on the server, sidestepping the copy/paste
+    issues that come with hand-editing password_hash directly in MongoDB.
+    Remove the EMERGENCY_RESET_KEY environment variable once you're back in, to
+    close this off again.
+    """
+    if not EMERGENCY_RESET_KEY:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not check_rate_limit(client_ip, 5):
+        raise HTTPException(status_code=429, detail="Too many attempts. Please try again later.")
+
+    if not hmac.compare_digest(payload.recovery_key, EMERGENCY_RESET_KEY):
+        raise HTTPException(status_code=403, detail="Invalid recovery key")
+
+    db = get_db()
+    email = payload.email.strip()
+    admin = db.admins.find_one({"email": email}, {"_id": 0})
+    if not admin:
+        raise HTTPException(status_code=404, detail="No account found with that email")
+
+    new_hash = hash_password(payload.new_password)
+    db.admins.update_one({"email": email}, {"$set": {"password_hash": new_hash}})
+    logger.warning(f"Emergency password reset performed for {email}")
+
+    return {"status": "success", "message": "Password updated. You can now log in with your new password."}
 
 @api_router.post("/admin/register")
 def admin_register(admin_data: AdminCreate):
