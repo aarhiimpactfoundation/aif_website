@@ -346,7 +346,11 @@ def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 def verify_password(password: str, password_hash: str) -> bool:
-    return bcrypt.checkpw(password.encode('utf-8'), password_hash.encode('utf-8'))
+    try:
+        return bcrypt.checkpw(password.encode('utf-8'), password_hash.strip().encode('utf-8'))
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Password check failed due to a malformed stored hash: {e}")
+        return False
 
 def create_token(user_id: str, email: str, role: str = "admin") -> str:
     if not JWT_SECRET:
@@ -543,11 +547,16 @@ def get_events(category: Optional[str] = None, limit: int = 20):
     query = {"published": True}
     if category:
         query["category"] = category
-    events = list(db.events.find(query, {"_id": 0}).sort("created_at", -1).limit(limit))
-    for event in events:
-        if isinstance(event.get('created_at'), str):
-            event['created_at'] = datetime.fromisoformat(event['created_at'])
-    return events
+    raw_events = list(db.events.find(query, {"_id": 0}).sort("created_at", -1).limit(limit))
+    valid_events = []
+    for doc in raw_events:
+        try:
+            if isinstance(doc.get('created_at'), str):
+                doc['created_at'] = datetime.fromisoformat(doc['created_at'])
+            valid_events.append(Event(**doc))
+        except Exception as e:
+            logger.warning(f"Skipping malformed event document (id={doc.get('id', 'unknown')}): {e}")
+    return valid_events
 
 @api_router.get("/events/{event_id}", response_model=Event)
 def get_event(event_id: str):
@@ -683,9 +692,16 @@ def verify_donation_payment(payload: DonationVerify, request: Request):
 @api_router.post("/admin/login")
 def admin_login(login: AdminLogin):
     db = get_db()
-    admin = db.admins.find_one({"email": login.email}, {"_id": 0})
-    if not admin or not verify_password(login.password, admin['password_hash']):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    try:
+        admin = db.admins.find_one({"email": login.email.strip()}, {"_id": 0})
+        if not admin or not verify_password(login.password, admin['password_hash']):
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Unexpected error during login for {login.email}: {e}")
+        raise HTTPException(status_code=500, detail=f"Login error: {str(e)}")
+
     role = admin.get('role', 'admin')
     token = create_token(admin['id'], admin['email'], role)
     return {"token": token, "admin": {"id": admin['id'], "email": admin['email'], "name": admin['name'], "role": role}}
@@ -777,11 +793,16 @@ def get_current_admin_info(admin = Depends(get_current_admin)):
 @api_router.get("/admin/events", response_model=List[Event])
 def admin_get_events(admin = Depends(require_staff)):
     db = get_db()
-    events = list(db.events.find({}, {"_id": 0}).sort("created_at", -1).limit(100))
-    for event in events:
-        if isinstance(event.get('created_at'), str):
-            event['created_at'] = datetime.fromisoformat(event['created_at'])
-    return events
+    raw_events = list(db.events.find({}, {"_id": 0}).sort("created_at", -1).limit(100))
+    valid_events = []
+    for doc in raw_events:
+        try:
+            if isinstance(doc.get('created_at'), str):
+                doc['created_at'] = datetime.fromisoformat(doc['created_at'])
+            valid_events.append(Event(**doc))
+        except Exception as e:
+            logger.warning(f"Malformed event document in admin list (id={doc.get('id', 'unknown')}): {e}")
+    return valid_events
 
 @api_router.post("/admin/events", response_model=Event)
 def admin_create_event(event_data: EventCreate, admin = Depends(require_staff)):
