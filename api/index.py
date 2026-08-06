@@ -1,5 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import PlainTextResponse, Response, JSONResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from starlette.middleware.cors import CORSMiddleware
 from pymongo import MongoClient
@@ -70,6 +70,18 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None if os.environ.get('ENVIRONMENT') == 'production' else "/openapi.json"
 )
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    # Only truly unhandled exceptions reach here — HTTPException (our normal
+    # 400/401/403/404/429/503 responses) is handled by FastAPI's own default
+    # handler first, since it's more specific. This exists so any future crash
+    # is immediately visible in the response itself, not just buried in logs.
+    logger.exception(f"Unhandled exception on {request.method} {request.url.path}: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"{type(exc).__name__}: {str(exc)}"}
+    )
 
 # Create router with /api prefix
 api_router = APIRouter(prefix="/api")
@@ -1014,7 +1026,18 @@ app.include_router(api_router)
 # Security Headers Middleware
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        # BaseHTTPMiddleware (this decorator style) doesn't let FastAPI's own
+        # exception handlers run cleanly on downstream crashes — without this
+        # try/except, every unhandled error becomes a bare, contentless
+        # "Internal Server Error" instead of a diagnosable JSON message.
+        logger.exception(f"Unhandled exception on {request.method} {request.url.path}: {exc}")
+        response = JSONResponse(
+            status_code=500,
+            content={"detail": f"{type(exc).__name__}: {str(exc)}"}
+        )
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["X-XSS-Protection"] = "1; mode=block"
