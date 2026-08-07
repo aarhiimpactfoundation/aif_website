@@ -154,7 +154,7 @@ export default function Footer() {
             © 2026 Aarhi Impact Foundation | Section 8 Nonprofit Organization
           </p>
           <p className="text-white/40 text-xs mt-4 md:mt-0">
-            CIN: UXXXXXXXXXXXXX
+            CIN: U88900AS2025NPL028634 | Section 8 License No. 171467
           </p>
         </div>
       </div>
