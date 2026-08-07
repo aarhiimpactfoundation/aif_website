@@ -11,7 +11,8 @@ import {
   SignOut,
   EnvelopeOpen,
   Check,
-  FileText
+  FileText,
+  MagnifyingGlass
 } from '@phosphor-icons/react';
 import {
   Dialog,
@@ -32,6 +33,18 @@ export default function AdminContacts() {
   const [contacts, setContacts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedContact, setSelectedContact] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+
+  const filteredContacts = contacts.filter((c) => {
+    const matchesStatus = statusFilter === 'all' || c.status === statusFilter;
+    const q = searchQuery.trim().toLowerCase();
+    const matchesSearch = !q ||
+      c.name?.toLowerCase().includes(q) ||
+      c.email?.toLowerCase().includes(q) ||
+      c.subject?.toLowerCase().includes(q);
+    return matchesStatus && matchesSearch;
+  });
 
   useEffect(() => {
     const token = localStorage.getItem('adminToken');
@@ -144,14 +157,40 @@ export default function AdminContacts() {
       {/* Main Content */}
       <main className="flex-1 p-8">
         <div className="max-w-6xl mx-auto">
-          <h1 className="font-manrope text-2xl font-bold text-[#1B4332] mb-8">Contact Messages</h1>
+          <h1 className="font-manrope text-2xl font-bold text-[#1B4332] mb-6">Contact Messages</h1>
+
+          {/* Search & Filter */}
+          <div className="flex flex-col sm:flex-row gap-3 mb-4">
+            <div className="relative flex-1">
+              <MagnifyingGlass size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by name, email, or subject..."
+                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-sm text-sm focus:outline-none focus:border-[#2D6A6A]"
+                data-testid="contacts-search-input"
+              />
+            </div>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="px-3 py-2 border border-gray-200 rounded-sm text-sm focus:outline-none focus:border-[#2D6A6A]"
+            >
+              <option value="all">All statuses</option>
+              <option value="new">New</option>
+              <option value="reviewed">Reviewed</option>
+            </select>
+          </div>
 
           {/* Contacts Table */}
           <div className="bg-white rounded-sm shadow-sm overflow-hidden">
             {loading ? (
               <div className="p-8 text-center text-gray-500">Loading messages...</div>
-            ) : contacts.length === 0 ? (
-              <div className="p-8 text-center text-gray-500">No contact messages yet.</div>
+            ) : filteredContacts.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">
+                {contacts.length === 0 ? 'No contact messages yet.' : 'No messages match your search.'}
+              </div>
             ) : (
               <table className="w-full admin-table">
                 <thead>
@@ -165,7 +204,7 @@ export default function AdminContacts() {
                   </tr>
                 </thead>
                 <tbody>
-                  {contacts.map((contact) => (
+                  {filteredContacts.map((contact) => (
                     <tr key={contact.id} className={contact.status === 'new' ? 'bg-blue-50/50' : ''}>
                       <td>
                         <div className="font-medium text-[#1B4332]">{contact.name}</div>

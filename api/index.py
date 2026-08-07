@@ -1006,6 +1006,12 @@ def list_admin_users(admin = Depends(require_admin_role)):
             u['created_at'] = datetime.fromisoformat(u['created_at'])
     return users
 
+@api_router.get("/admin/audit-log")
+def get_audit_log(admin = Depends(require_admin_role), limit: int = 200):
+    db = get_db()
+    entries = list(db.audit_log.find({}, {"_id": 0}).sort("timestamp", -1).limit(min(limit, 500)))
+    return entries
+
 @api_router.post("/admin/users", response_model=AdminUserPublic)
 def create_admin_user(user_data: AdminUserCreate, admin = Depends(require_admin_role)):
     db = get_db()
@@ -1381,6 +1387,84 @@ class SecurityHeadersMiddleware:
         await self.app(scope, receive, send_with_headers)
 
 app.add_middleware(SecurityHeadersMiddleware)
+
+# Audit Log Middleware — records who did what, without modifying any of the
+# existing admin endpoints. Observes admin/staff mutations (POST/PUT/DELETE)
+# from the outside: reads the admin's identity from their JWT, and only logs
+# requests that actually succeeded (2xx). Deliberately excludes the
+# auth-flow endpoints (login/register/emergency-reset) since there's no
+# authenticated identity to attribute those to yet.
+AUDIT_EXCLUDED_PATHS = {"/api/admin/login", "/api/admin/register", "/api/admin/emergency-reset"}
+
+def _audit_resource_type(path: str) -> str:
+    if path == "/api/donations/bank-details":
+        return "donation_settings"
+    parts = path.strip("/").split("/")
+    if len(parts) >= 3:
+        return parts[2]
+    return "unknown"
+
+class AuditLogMiddleware:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        method = scope.get("method", "")
+        path = scope.get("path", "")
+        is_tracked = (
+            method in ("POST", "PUT", "DELETE")
+            and (path.startswith("/api/admin/") or path == "/api/donations/bank-details")
+            and path not in AUDIT_EXCLUDED_PATHS
+        )
+
+        if not is_tracked:
+            await self.app(scope, receive, send)
+            return
+
+        status_holder = {"code": None}
+
+        async def send_and_capture(message):
+            if message["type"] == "http.response.start":
+                status_holder["code"] = message["status"]
+            await send(message)
+
+        await self.app(scope, receive, send_and_capture)
+
+        status = status_holder["code"]
+        if status is not None and 200 <= status < 300:
+            try:
+                admin_email = "unknown"
+                admin_role = "unknown"
+                raw_headers = dict(scope.get("headers") or [])
+                auth_header = raw_headers.get(b"authorization", b"").decode("utf-8", errors="ignore")
+                if auth_header.startswith("Bearer ") and JWT_SECRET:
+                    token = auth_header[7:]
+                    try:
+                        token_payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+                        admin_email = token_payload.get("email", "unknown")
+                        admin_role = token_payload.get("role", "unknown")
+                    except Exception:
+                        pass
+
+                db = get_db()
+                db.audit_log.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "admin_email": admin_email,
+                    "admin_role": admin_role,
+                    "method": method,
+                    "path": path,
+                    "resource_type": _audit_resource_type(path),
+                    "status": status,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+            except Exception as e:
+                logger.warning(f"Audit log write failed: {e}")
+
+app.add_middleware(AuditLogMiddleware)
 
 # CORS middleware
 app.add_middleware(

@@ -36,6 +36,7 @@ import AdminDonations from "@/pages/admin/AdminDonations";
 import AdminTestimonials from "@/pages/admin/AdminTestimonials";
 import AdminGallery from "@/pages/admin/AdminGallery";
 import AdminUsers from "@/pages/admin/AdminUsers";
+import AdminAuditLog from "@/pages/admin/AdminAuditLog";
 
 // Layout wrapper for public pages
 const PublicLayout = ({ children }) => (
@@ -83,6 +84,7 @@ function App() {
           <Route path="/admin/testimonials" element={<AdminTestimonials />} />
           <Route path="/admin/gallery" element={<AdminGallery />} />
           <Route path="/admin/users" element={<AdminUsers />} />
+          <Route path="/admin/audit-log" element={<AdminAuditLog />} />
         </Routes>
       </BrowserRouter>
       <Toaster position="top-right" />

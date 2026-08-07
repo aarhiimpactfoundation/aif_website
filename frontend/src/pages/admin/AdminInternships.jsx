@@ -12,7 +12,8 @@ import {
   Eye,
   Check,
   X,
-  FileText
+  FileText,
+  MagnifyingGlass
 } from '@phosphor-icons/react';
 import {
   Dialog,
@@ -40,6 +41,20 @@ export default function AdminInternships() {
   const [applications, setApplications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [selectedApp, setSelectedApp] = useState(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [trackFilter, setTrackFilter] = useState('all');
+
+  const filteredApplications = applications.filter((a) => {
+    const matchesStatus = statusFilter === 'all' || a.status === statusFilter;
+    const matchesTrack = trackFilter === 'all' || a.track === trackFilter;
+    const q = searchQuery.trim().toLowerCase();
+    const matchesSearch = !q ||
+      a.name?.toLowerCase().includes(q) ||
+      a.email?.toLowerCase().includes(q) ||
+      a.education?.toLowerCase().includes(q);
+    return matchesStatus && matchesTrack && matchesSearch;
+  });
 
   useEffect(() => {
     const token = localStorage.getItem('adminToken');
@@ -153,14 +168,52 @@ export default function AdminInternships() {
       {/* Main Content */}
       <main className="flex-1 p-8">
         <div className="max-w-6xl mx-auto">
-          <h1 className="font-manrope text-2xl font-bold text-[#1B4332] mb-8">Internship Applications</h1>
+          <h1 className="font-manrope text-2xl font-bold text-[#1B4332] mb-6">Internship Applications</h1>
+
+          {/* Search & Filters */}
+          <div className="flex flex-col sm:flex-row gap-3 mb-4">
+            <div className="relative flex-1">
+              <MagnifyingGlass size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by name, email, or education..."
+                className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-sm text-sm focus:outline-none focus:border-[#2D6A6A]"
+                data-testid="applications-search-input"
+              />
+            </div>
+            <select
+              value={trackFilter}
+              onChange={(e) => setTrackFilter(e.target.value)}
+              className="px-3 py-2 border border-gray-200 rounded-sm text-sm focus:outline-none focus:border-[#2D6A6A]"
+            >
+              <option value="all">All tracks</option>
+              {Object.entries(trackLabels).map(([id, label]) => (
+                <option key={id} value={id}>{label}</option>
+              ))}
+            </select>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="px-3 py-2 border border-gray-200 rounded-sm text-sm focus:outline-none focus:border-[#2D6A6A]"
+            >
+              <option value="all">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="reviewed">Reviewed</option>
+              <option value="accepted">Accepted</option>
+              <option value="rejected">Rejected</option>
+            </select>
+          </div>
 
           {/* Applications Table */}
           <div className="bg-white rounded-sm shadow-sm overflow-hidden">
             {loading ? (
               <div className="p-8 text-center text-gray-500">Loading applications...</div>
-            ) : applications.length === 0 ? (
-              <div className="p-8 text-center text-gray-500">No applications yet.</div>
+            ) : filteredApplications.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">
+                {applications.length === 0 ? 'No applications yet.' : 'No applications match your search.'}
+              </div>
             ) : (
               <table className="w-full admin-table">
                 <thead>
@@ -174,7 +227,7 @@ export default function AdminInternships() {
                   </tr>
                 </thead>
                 <tbody>
-                  {applications.map((app) => (
+                  {filteredApplications.map((app) => (
                     <tr key={app.id} className={app.status === 'pending' ? 'bg-yellow-50/50' : ''}>
                       <td>
                         <div className="font-medium text-[#1B4332]">{app.name}</div>
