@@ -11,6 +11,7 @@ const navLinks = [
   { name: 'Programs', path: '/programs' },
   { name: 'Impact', path: '/impact' },
   { name: 'Events & Updates', path: '/events' },
+  { name: 'Gallery', path: '/gallery' },
   { name: 'Internships', path: '/internships' },
   { name: 'CSR Partnership', path: '/csr-partnership' },
   { name: 'Contact', path: '/contact' },

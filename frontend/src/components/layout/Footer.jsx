@@ -16,6 +16,7 @@ const footerLinks = {
     { name: 'CSR Partnership', path: '/csr-partnership' },
     { name: 'Internships', path: '/internships' },
     { name: 'Events', path: '/events' },
+    { name: 'Gallery', path: '/gallery' },
     { name: 'Contact', path: '/contact' },
   ],
   legal: [

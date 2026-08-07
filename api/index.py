@@ -213,6 +213,27 @@ class TestimonialUpdate(BaseModel):
     image_url: Optional[str] = None
     published: Optional[bool] = None
 
+class GalleryPhoto(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    image_url: str
+    caption: Optional[str] = None
+    category: str = "general"
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    published: bool = True
+
+class GalleryPhotoCreate(BaseModel):
+    image_url: str
+    caption: Optional[str] = None
+    category: str = "general"
+    published: bool = True
+
+class GalleryPhotoUpdate(BaseModel):
+    image_url: Optional[str] = None
+    caption: Optional[str] = None
+    category: Optional[str] = None
+    published: Optional[bool] = None
+
 class AdminUser(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -619,6 +640,24 @@ def get_testimonials(limit: int = 20):
             valid.append(Testimonial(**doc))
         except Exception as e:
             logger.warning(f"Skipping malformed testimonial document (id={doc.get('id', 'unknown')}): {e}")
+    return valid
+
+# Photo Gallery (Public)
+@api_router.get("/gallery", response_model=List[GalleryPhoto])
+def get_gallery_photos(category: Optional[str] = None, limit: int = 60):
+    db = get_db()
+    query = {"published": True}
+    if category and category != "all":
+        query["category"] = category
+    raw = list(db.gallery.find(query, {"_id": 0}).sort("created_at", -1).limit(limit))
+    valid = []
+    for doc in raw:
+        try:
+            if isinstance(doc.get('created_at'), str):
+                doc['created_at'] = datetime.fromisoformat(doc['created_at'])
+            valid.append(GalleryPhoto(**doc))
+        except Exception as e:
+            logger.warning(f"Skipping malformed gallery document (id={doc.get('id', 'unknown')}): {e}")
     return valid
 
 # Donation Info
@@ -1141,6 +1180,54 @@ def admin_delete_testimonial(testimonial_id: str, admin = Depends(require_staff)
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Testimonial not found")
     return {"message": "Testimonial deleted"}
+
+# Admin - Photo Gallery Management
+@api_router.get("/admin/gallery", response_model=List[GalleryPhoto])
+def admin_get_gallery_photos(admin = Depends(require_staff)):
+    db = get_db()
+    raw = list(db.gallery.find({}, {"_id": 0}).sort("created_at", -1).limit(300))
+    valid = []
+    for doc in raw:
+        try:
+            if isinstance(doc.get('created_at'), str):
+                doc['created_at'] = datetime.fromisoformat(doc['created_at'])
+            valid.append(GalleryPhoto(**doc))
+        except Exception as e:
+            logger.warning(f"Malformed gallery document in admin list (id={doc.get('id', 'unknown')}): {e}")
+    return valid
+
+@api_router.post("/admin/gallery", response_model=GalleryPhoto)
+def admin_create_gallery_photo(data: GalleryPhotoCreate, admin = Depends(require_staff)):
+    db = get_db()
+    photo = GalleryPhoto(**data.model_dump())
+    doc = photo.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    db.gallery.insert_one(doc)
+    return photo
+
+@api_router.put("/admin/gallery/{photo_id}", response_model=GalleryPhoto)
+def admin_update_gallery_photo(photo_id: str, data: GalleryPhotoUpdate, admin = Depends(require_staff)):
+    db = get_db()
+    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No update data provided")
+
+    result = db.gallery.update_one({"id": photo_id}, {"$set": update_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Photo not found")
+
+    photo = db.gallery.find_one({"id": photo_id}, {"_id": 0})
+    if isinstance(photo.get('created_at'), str):
+        photo['created_at'] = datetime.fromisoformat(photo['created_at'])
+    return photo
+
+@api_router.delete("/admin/gallery/{photo_id}")
+def admin_delete_gallery_photo(photo_id: str, admin = Depends(require_staff)):
+    db = get_db()
+    result = db.gallery.delete_one({"id": photo_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Photo not found")
+    return {"message": "Photo deleted"}
 
 # Admin - Contact Submissions
 @api_router.get("/admin/contacts", response_model=List[ContactSubmission])

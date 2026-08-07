@@ -13,6 +13,7 @@ import About from "@/pages/About";
 import Programs from "@/pages/Programs";
 import Impact from "@/pages/Impact";
 import Events from "@/pages/Events";
+import Gallery from "@/pages/Gallery";
 import EventDetail from "@/pages/EventDetail";
 import Internships from "@/pages/Internships";
 import Donate from "@/pages/Donate";
@@ -33,6 +34,7 @@ import AdminContacts from "@/pages/admin/AdminContacts";
 import AdminInternships from "@/pages/admin/AdminInternships";
 import AdminDonations from "@/pages/admin/AdminDonations";
 import AdminTestimonials from "@/pages/admin/AdminTestimonials";
+import AdminGallery from "@/pages/admin/AdminGallery";
 import AdminUsers from "@/pages/admin/AdminUsers";
 
 // Layout wrapper for public pages
@@ -56,6 +58,7 @@ function App() {
           <Route path="/programs" element={<PublicLayout><Programs /></PublicLayout>} />
           <Route path="/impact" element={<PublicLayout><Impact /></PublicLayout>} />
           <Route path="/events" element={<PublicLayout><Events /></PublicLayout>} />
+          <Route path="/gallery" element={<PublicLayout><Gallery /></PublicLayout>} />
           <Route path="/events/:eventId" element={<PublicLayout><EventDetail /></PublicLayout>} />
           <Route path="/internships" element={<PublicLayout><Internships /></PublicLayout>} />
           <Route path="/donate" element={<PublicLayout><Donate /></PublicLayout>} />
@@ -78,6 +81,7 @@ function App() {
           <Route path="/admin/internships" element={<AdminInternships />} />
           <Route path="/admin/donations" element={<AdminDonations />} />
           <Route path="/admin/testimonials" element={<AdminTestimonials />} />
+          <Route path="/admin/gallery" element={<AdminGallery />} />
           <Route path="/admin/users" element={<AdminUsers />} />
         </Routes>
       </BrowserRouter>
