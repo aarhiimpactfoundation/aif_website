@@ -424,6 +424,21 @@ export default function Donate() {
             </div>
           </div>
 
+          {/* Monthly Giving Note */}
+          {selectedType === 'monthly' && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mt-8 bg-[#F1EFE9] border border-[#C2A878]/40 p-6 rounded-sm"
+            >
+              <p className="text-[#1B4332] text-sm leading-relaxed">
+                <strong>A note on monthly giving:</strong> automatic recurring billing isn't set up yet on our site.
+                Selecting "Monthly" processes today's contribution as a one-time gift — we'd be grateful if you
+                returned each month to give again. We're working on true auto-recurring monthly donations soon.
+              </p>
+            </motion.div>
+          )}
+
           {/* CSR Note */}
           {selectedType === 'csr' && (
             <motion.div
