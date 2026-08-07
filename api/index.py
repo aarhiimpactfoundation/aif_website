@@ -854,6 +854,43 @@ def delete_admin_user(user_id: str, admin = Depends(require_admin_role)):
 def get_current_admin_info(admin = Depends(get_current_admin)):
     return admin
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+    @field_validator('new_password')
+    @classmethod
+    def validate_new_password(cls, v):
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters')
+        if not re.search(r'[A-Z]', v):
+            raise ValueError('Password must contain at least one uppercase letter')
+        if not re.search(r'[a-z]', v):
+            raise ValueError('Password must contain at least one lowercase letter')
+        if not re.search(r'[0-9]', v):
+            raise ValueError('Password must contain at least one number')
+        return v
+
+@api_router.put("/admin/me/password")
+def change_own_password(payload: ChangePasswordRequest, admin = Depends(get_current_admin)):
+    db = get_db()
+    user_id = admin.get("sub")
+    user = db.admins.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    if not verify_password(payload.current_password, user['password_hash']):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+    if payload.current_password == payload.new_password:
+        raise HTTPException(status_code=400, detail="New password must be different from the current one")
+
+    new_hash = hash_password(payload.new_password)
+    db.admins.update_one({"id": user_id}, {"$set": {"password_hash": new_hash}})
+    logger.info(f"Password self-changed for {user.get('email')}")
+
+    return {"status": "success", "message": "Password updated successfully"}
+
 # Admin - Events Management
 @api_router.get("/admin/events", response_model=List[Event])
 def admin_get_events(admin = Depends(require_staff)):

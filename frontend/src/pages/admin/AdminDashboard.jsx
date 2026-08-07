@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { toast } from 'sonner';
 import {
   House,
   CalendarBlank,
@@ -9,8 +10,17 @@ import {
   SignOut,
   ChartLine,
   FileText,
-  HandCoins
+  HandCoins,
+  Key
 } from '@phosphor-icons/react';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { getSidebarLinks } from '@/lib/adminNav';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
@@ -30,6 +40,13 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [admin, setAdmin] = useState(null);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({
+    current_password: '',
+    new_password: '',
+    confirm_password: ''
+  });
 
   useEffect(() => {
     const token = localStorage.getItem('adminToken');
@@ -61,6 +78,32 @@ export default function AdminDashboard() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    if (passwordForm.new_password !== passwordForm.confirm_password) {
+      toast.error("New password and confirmation don't match");
+      return;
+    }
+
+    const token = localStorage.getItem('adminToken');
+    setChangingPassword(true);
+    try {
+      await axios.put(`${API}/admin/me/password`, {
+        current_password: passwordForm.current_password,
+        new_password: passwordForm.new_password
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      toast.success('Password updated successfully');
+      setShowPasswordModal(false);
+      setPasswordForm({ current_password: '', new_password: '', confirm_password: '' });
+    } catch (error) {
+      toast.error(error.response?.data?.detail || 'Failed to update password');
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -112,6 +155,14 @@ export default function AdminDashboard() {
               </span>
             </div>
           )}
+          <button
+            onClick={() => setShowPasswordModal(true)}
+            className="flex items-center gap-3 px-4 py-2 text-white/70 hover:text-white text-sm transition-colors w-full"
+            data-testid="change-password-btn"
+          >
+            <Key size={20} />
+            Change Password
+          </button>
           <button
             onClick={handleLogout}
             className="flex items-center gap-3 px-4 py-2 text-white/70 hover:text-white text-sm transition-colors w-full"
@@ -242,6 +293,70 @@ export default function AdminDashboard() {
           )}
         </div>
       </main>
+
+      {/* Change Password Modal */}
+      <Dialog open={showPasswordModal} onOpenChange={setShowPasswordModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Change Password</DialogTitle>
+          </DialogHeader>
+          <form onSubmit={handleChangePassword} className="space-y-4">
+            <div>
+              <Label htmlFor="current_password">Current Password</Label>
+              <Input
+                id="current_password"
+                type="password"
+                value={passwordForm.current_password}
+                onChange={(e) => setPasswordForm({ ...passwordForm, current_password: e.target.value })}
+                required
+                data-testid="current-password-input"
+              />
+            </div>
+            <div>
+              <Label htmlFor="new_password">New Password</Label>
+              <Input
+                id="new_password"
+                type="password"
+                value={passwordForm.new_password}
+                onChange={(e) => setPasswordForm({ ...passwordForm, new_password: e.target.value })}
+                required
+                data-testid="new-password-input"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                At least 8 characters, with an uppercase letter, a lowercase letter, and a number.
+              </p>
+            </div>
+            <div>
+              <Label htmlFor="confirm_password">Confirm New Password</Label>
+              <Input
+                id="confirm_password"
+                type="password"
+                value={passwordForm.confirm_password}
+                onChange={(e) => setPasswordForm({ ...passwordForm, confirm_password: e.target.value })}
+                required
+                data-testid="confirm-password-input"
+              />
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowPasswordModal(false)}
+                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={changingPassword}
+                className="px-4 py-2 bg-[#1B4332] text-white rounded-lg hover:bg-[#153627] disabled:opacity-60"
+                data-testid="submit-password-change-btn"
+              >
+                {changingPassword ? 'Updating…' : 'Update Password'}
+              </button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
