@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { 
   Users, 
@@ -6,9 +7,14 @@ import {
   Handshake,
   MapPin,
   TrendUp,
-  ChartLine
+  ChartLine,
+  Quotes
 } from '@phosphor-icons/react';
 import { Link } from 'react-router-dom';
+import axios from 'axios';
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+const API = `${BACKEND_URL}/api`;
 
 const impactMetrics = [
   { 
@@ -62,22 +68,17 @@ const initiatives = [
   }
 ];
 
-const impactStories = [
-  {
-    title: "Farmer Success Story",
-    quote: "The sustainable farming practices introduced by Aarhi have helped us improve our yield while reducing input costs. We're now exploring organic certification.",
-    author: "Tea Farmer, Assam",
-    placeholder: true
-  },
-  {
-    title: "Youth Training Impact",
-    quote: "The solar installation training gave me practical skills that are in high demand. I'm now employed as a technician with a renewable energy company.",
-    author: "Green Skills Graduate",
-    placeholder: true
-  }
-];
-
 export default function Impact() {
+  const [testimonials, setTestimonials] = useState([]);
+  const [loadingTestimonials, setLoadingTestimonials] = useState(true);
+
+  useEffect(() => {
+    axios.get(`${API}/testimonials`)
+      .then((res) => setTestimonials(res.data))
+      .catch((err) => console.error('Error fetching testimonials:', err))
+      .finally(() => setLoadingTestimonials(false));
+  }, []);
+
   return (
     <div className="page-transition pt-20" data-testid="impact-page">
       {/* Hero Section */}
@@ -187,35 +188,46 @@ export default function Impact() {
             <h2 className="font-manrope text-3xl md:text-4xl font-bold text-[#1B4332] mt-3">
               Impact Stories
             </h2>
-            <p className="text-gray-500 mt-4">(Representative stories - actual testimonials coming soon)</p>
           </div>
-          <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-            {impactStories.map((story, index) => (
-              <motion.div
-                key={story.title}
-                initial={{ opacity: 0, x: index === 0 ? -20 : 20 }}
-                whileInView={{ opacity: 1, x: 0 }}
-                viewport={{ once: true }}
-                className="bg-[#F1EFE9] p-8 rounded-sm relative"
-              >
-                <div className="absolute -top-4 left-8 w-8 h-8 bg-[#C2A878] rounded-full flex items-center justify-center">
-                  <span className="text-white text-2xl font-serif">"</span>
-                </div>
-                <h4 className="font-manrope font-semibold text-[#1B4332] mb-4 mt-2">
-                  {story.title}
-                </h4>
-                <p className="text-gray-600 italic leading-relaxed mb-4">
-                  "{story.quote}"
-                </p>
-                <p className="text-[#2D6A6A] font-medium text-sm">
-                  — {story.author}
-                </p>
-                {story.placeholder && (
-                  <span className="text-xs text-gray-400 mt-2 block">(Placeholder)</span>
-                )}
-              </motion.div>
-            ))}
-          </div>
+          {loadingTestimonials ? (
+            <div className="flex justify-center">
+              <div className="w-8 h-8 border-4 border-[#1B4332] border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : testimonials.length === 0 ? (
+            <p className="text-center text-gray-400">Stories from the field are coming soon.</p>
+          ) : (
+            <div className="grid md:grid-cols-2 gap-8 max-w-4xl mx-auto">
+              {testimonials.map((story, index) => (
+                <motion.div
+                  key={story.id}
+                  initial={{ opacity: 0, x: index % 2 === 0 ? -20 : 20 }}
+                  whileInView={{ opacity: 1, x: 0 }}
+                  viewport={{ once: true }}
+                  className="bg-[#F1EFE9] p-8 rounded-sm relative"
+                >
+                  <div className="absolute -top-4 left-8 w-8 h-8 bg-[#C2A878] rounded-full flex items-center justify-center">
+                    <Quotes size={16} weight="fill" className="text-white" />
+                  </div>
+                  {story.image_url && (
+                    <img
+                      src={story.image_url}
+                      alt={story.author}
+                      className="w-14 h-14 rounded-full object-cover mb-4"
+                    />
+                  )}
+                  <h4 className="font-manrope font-semibold text-[#1B4332] mb-4 mt-2">
+                    {story.title}
+                  </h4>
+                  <p className="text-gray-600 italic leading-relaxed mb-4">
+                    "{story.quote}"
+                  </p>
+                  <p className="text-[#2D6A6A] font-medium text-sm">
+                    — {story.author}
+                  </p>
+                </motion.div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 

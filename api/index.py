@@ -189,6 +189,30 @@ class EventUpdate(BaseModel):
     event_date: Optional[str] = None
     published: Optional[bool] = None
 
+class Testimonial(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    title: str
+    quote: str
+    author: str
+    image_url: Optional[str] = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    published: bool = True
+
+class TestimonialCreate(BaseModel):
+    title: str
+    quote: str
+    author: str
+    image_url: Optional[str] = None
+    published: bool = True
+
+class TestimonialUpdate(BaseModel):
+    title: Optional[str] = None
+    quote: Optional[str] = None
+    author: Optional[str] = None
+    image_url: Optional[str] = None
+    published: Optional[bool] = None
+
 class AdminUser(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -581,6 +605,21 @@ def get_event(event_id: str):
     if isinstance(event.get('created_at'), str):
         event['created_at'] = datetime.fromisoformat(event['created_at'])
     return event
+
+# Testimonials (Public)
+@api_router.get("/testimonials", response_model=List[Testimonial])
+def get_testimonials(limit: int = 20):
+    db = get_db()
+    raw = list(db.testimonials.find({"published": True}, {"_id": 0}).sort("created_at", -1).limit(limit))
+    valid = []
+    for doc in raw:
+        try:
+            if isinstance(doc.get('created_at'), str):
+                doc['created_at'] = datetime.fromisoformat(doc['created_at'])
+            valid.append(Testimonial(**doc))
+        except Exception as e:
+            logger.warning(f"Skipping malformed testimonial document (id={doc.get('id', 'unknown')}): {e}")
+    return valid
 
 # Donation Info
 @api_router.get("/donations/bank-details", response_model=BankDetails)
@@ -1054,6 +1093,54 @@ def admin_delete_event(event_id: str, admin = Depends(require_staff)):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Event not found")
     return {"message": "Event deleted"}
+
+# Admin - Testimonials Management
+@api_router.get("/admin/testimonials", response_model=List[Testimonial])
+def admin_get_testimonials(admin = Depends(require_staff)):
+    db = get_db()
+    raw = list(db.testimonials.find({}, {"_id": 0}).sort("created_at", -1).limit(200))
+    valid = []
+    for doc in raw:
+        try:
+            if isinstance(doc.get('created_at'), str):
+                doc['created_at'] = datetime.fromisoformat(doc['created_at'])
+            valid.append(Testimonial(**doc))
+        except Exception as e:
+            logger.warning(f"Malformed testimonial document in admin list (id={doc.get('id', 'unknown')}): {e}")
+    return valid
+
+@api_router.post("/admin/testimonials", response_model=Testimonial)
+def admin_create_testimonial(data: TestimonialCreate, admin = Depends(require_staff)):
+    db = get_db()
+    testimonial = Testimonial(**data.model_dump())
+    doc = testimonial.model_dump()
+    doc['created_at'] = doc['created_at'].isoformat()
+    db.testimonials.insert_one(doc)
+    return testimonial
+
+@api_router.put("/admin/testimonials/{testimonial_id}", response_model=Testimonial)
+def admin_update_testimonial(testimonial_id: str, data: TestimonialUpdate, admin = Depends(require_staff)):
+    db = get_db()
+    update_data = {k: v for k, v in data.model_dump().items() if v is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No update data provided")
+
+    result = db.testimonials.update_one({"id": testimonial_id}, {"$set": update_data})
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Testimonial not found")
+
+    testimonial = db.testimonials.find_one({"id": testimonial_id}, {"_id": 0})
+    if isinstance(testimonial.get('created_at'), str):
+        testimonial['created_at'] = datetime.fromisoformat(testimonial['created_at'])
+    return testimonial
+
+@api_router.delete("/admin/testimonials/{testimonial_id}")
+def admin_delete_testimonial(testimonial_id: str, admin = Depends(require_staff)):
+    db = get_db()
+    result = db.testimonials.delete_one({"id": testimonial_id})
+    if result.deleted_count == 0:
+        raise HTTPException(status_code=404, detail="Testimonial not found")
+    return {"message": "Testimonial deleted"}
 
 # Admin - Contact Submissions
 @api_router.get("/admin/contacts", response_model=List[ContactSubmission])

@@ -32,6 +32,7 @@ import AdminReports from "@/pages/admin/AdminReports";
 import AdminContacts from "@/pages/admin/AdminContacts";
 import AdminInternships from "@/pages/admin/AdminInternships";
 import AdminDonations from "@/pages/admin/AdminDonations";
+import AdminTestimonials from "@/pages/admin/AdminTestimonials";
 import AdminUsers from "@/pages/admin/AdminUsers";
 
 // Layout wrapper for public pages
@@ -76,6 +77,7 @@ function App() {
           <Route path="/admin/contacts" element={<AdminContacts />} />
           <Route path="/admin/internships" element={<AdminInternships />} />
           <Route path="/admin/donations" element={<AdminDonations />} />
+          <Route path="/admin/testimonials" element={<AdminTestimonials />} />
           <Route path="/admin/users" element={<AdminUsers />} />
         </Routes>
       </BrowserRouter>
