@@ -10,6 +10,7 @@ import hmac
 from pydantic import BaseModel, Field, EmailStr, ConfigDict, field_validator
 from typing import List, Optional
 import uuid
+import json
 from datetime import datetime, timezone
 import jwt
 import bcrypt
@@ -608,6 +609,38 @@ def list_donations(admin = Depends(require_staff)):
     total_amount = sum(d.get("amount", 0) for d in donations)
     return {"donations": donations, "total_amount": total_amount, "count": len(donations)}
 
+@api_router.get("/admin/donations/export")
+def export_donations_csv(admin = Depends(require_staff)):
+    import csv
+    import io
+
+    db = get_db()
+    donations = list(db.donations.find({}, {"_id": 0}).sort("created_at", -1).limit(5000))
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Date", "Donor Name", "Email", "Phone", "Amount (INR)", "Type", "Payment ID", "Order ID", "Source"])
+    for d in donations:
+        writer.writerow([
+            d.get("created_at", ""),
+            d.get("donor_name", ""),
+            d.get("donor_email", ""),
+            d.get("donor_phone", ""),
+            d.get("amount", 0),
+            d.get("donation_type", ""),
+            d.get("payment_id", ""),
+            d.get("order_id", ""),
+            d.get("source", "browser"),
+        ])
+
+    csv_content = output.getvalue()
+    filename = f"aif_donations_{datetime.now(timezone.utc).strftime('%Y%m%d')}.csv"
+    return Response(
+        content=csv_content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
+
 @api_router.get("/donations/tiers", response_model=List[DonationTier])
 def get_donation_tiers():
     return [
@@ -666,6 +699,7 @@ def verify_donation_payment(payload: DonationVerify, request: Request):
     # Signature is genuine at this point — the payment is confirmed.
     # A DB or email hiccup below must NOT tell the donor their real,
     # already-successful payment "failed".
+    is_new_record = False
     try:
         db = get_db()
         doc = {
@@ -678,29 +712,111 @@ def verify_donation_payment(payload: DonationVerify, request: Request):
             "donor_phone": payload.donor_phone,
             "donation_type": payload.donation_type,
             "status": "verified",
+            "source": "browser",
             "created_at": datetime.now(timezone.utc).isoformat()
         }
-        db.donations.insert_one(doc)
+        result = db.donations.update_one(
+            {"payment_id": payload.razorpay_payment_id},
+            {"$setOnInsert": doc},
+            upsert=True
+        )
+        is_new_record = result.upserted_id is not None
     except Exception as e:
         logger.exception(f"Failed to record verified donation (payment_id={payload.razorpay_payment_id}) in DB: {e}")
 
-    try:
-        html = f"""
-        <h2>New Donation Received</h2>
-        <p><strong>Amount:</strong> &#8377;{payload.amount:,}</p>
-        <p><strong>Donor:</strong> {payload.donor_name}</p>
-        <p><strong>Email:</strong> {payload.donor_email}</p>
-        <p><strong>Phone:</strong> {payload.donor_phone or 'N/A'}</p>
-        <p><strong>Type:</strong> {payload.donation_type}</p>
-        <p><strong>Payment ID:</strong> {payload.razorpay_payment_id}</p>
-        """
-        send_notification_email(f"[AIF Donation] Rs.{payload.amount:,} from {payload.donor_name}", html)
-    except Exception as e:
-        logger.exception(f"Failed to send donation notification email (payment_id={payload.razorpay_payment_id}): {e}")
+    if is_new_record:
+        try:
+            html = f"""
+            <h2>New Donation Received</h2>
+            <p><strong>Amount:</strong> &#8377;{payload.amount:,}</p>
+            <p><strong>Donor:</strong> {payload.donor_name}</p>
+            <p><strong>Email:</strong> {payload.donor_email}</p>
+            <p><strong>Phone:</strong> {payload.donor_phone or 'N/A'}</p>
+            <p><strong>Type:</strong> {payload.donation_type}</p>
+            <p><strong>Payment ID:</strong> {payload.razorpay_payment_id}</p>
+            """
+            send_notification_email(f"[AIF Donation] Rs.{payload.amount:,} from {payload.donor_name}", html)
+        except Exception as e:
+            logger.exception(f"Failed to send donation notification email (payment_id={payload.razorpay_payment_id}): {e}")
 
     return {"status": "success", "message": "Payment verified successfully"}
 
-# ============== ADMIN ROUTES ==============
+# Razorpay Webhook — Razorpay's own servers call this directly the moment a
+# payment completes, independent of whether the donor's browser stays open
+# long enough to call /donations/verify-payment. This is what makes donation
+# records reliable rather than dependent on the browser.
+RAZORPAY_WEBHOOK_SECRET = os.environ.get('RAZORPAY_WEBHOOK_SECRET', '')
+
+@api_router.post("/webhooks/razorpay")
+async def razorpay_webhook(request: Request):
+    if not RAZORPAY_WEBHOOK_SECRET or not razorpay_client:
+        raise HTTPException(status_code=503, detail="Webhook not configured")
+
+    raw_body = await request.body()
+    signature = request.headers.get("X-Razorpay-Signature", "")
+
+    try:
+        razorpay_client.utility.verify_webhook_signature(
+            raw_body.decode('utf-8'), signature, RAZORPAY_WEBHOOK_SECRET
+        )
+    except razorpay.errors.SignatureVerificationError:
+        logger.warning("Razorpay webhook signature verification failed")
+        raise HTTPException(status_code=400, detail="Invalid webhook signature")
+
+    try:
+        payload = json.loads(raw_body)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
+    event = payload.get("event", "")
+    logger.info(f"Razorpay webhook received: {event}")
+
+    if event == "payment.captured":
+        payment_entity = payload.get("payload", {}).get("payment", {}).get("entity", {})
+        payment_id = payment_entity.get("id")
+        order_id = payment_entity.get("order_id")
+        amount_paise = payment_entity.get("amount", 0)
+        notes = payment_entity.get("notes") or {}
+
+        if payment_id:
+            db = get_db()
+            doc = {
+                "id": str(uuid.uuid4()),
+                "order_id": order_id,
+                "payment_id": payment_id,
+                "amount": amount_paise // 100,
+                "donor_name": notes.get("donor_name") or payment_entity.get("email", "Unknown"),
+                "donor_email": notes.get("donor_email") or payment_entity.get("email", ""),
+                "donor_phone": notes.get("donor_phone") or payment_entity.get("contact", ""),
+                "donation_type": notes.get("donation_type", "one-time"),
+                "status": "verified",
+                "source": "webhook",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            }
+            result = db.donations.update_one(
+                {"payment_id": payment_id},
+                {"$setOnInsert": doc},
+                upsert=True
+            )
+            if result.upserted_id is not None:
+                logger.info(f"Donation recorded via webhook: {payment_id}")
+                try:
+                    html = f"""
+                    <h2>New Donation Received (via webhook)</h2>
+                    <p><strong>Amount:</strong> &#8377;{doc['amount']:,}</p>
+                    <p><strong>Donor:</strong> {doc['donor_name']}</p>
+                    <p><strong>Email:</strong> {doc['donor_email']}</p>
+                    <p><strong>Payment ID:</strong> {payment_id}</p>
+                    """
+                    send_notification_email(f"[AIF Donation] Rs.{doc['amount']:,} from {doc['donor_name']}", html)
+                except Exception as e:
+                    logger.exception(f"Failed to send webhook donation notification: {e}")
+            else:
+                logger.info(f"Donation {payment_id} already recorded, webhook confirms it")
+
+    return {"status": "ok"}
+
+
 
 @api_router.post("/admin/login")
 def admin_login(login: AdminLogin):
